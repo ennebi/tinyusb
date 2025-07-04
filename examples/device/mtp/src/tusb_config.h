@@ -105,10 +105,6 @@
 #define CFG_MTP_INTERFACE (CFG_TUD_MODEL " MTP")
 #define CFG_MTP_STORAGE_ID_COUNT 1
 
-#define EPNUM_MTP_EVT   0x81
-#define EPNUM_MTP_IN    0x83
-#define EPNUM_MTP_OUT   0x04
-
 #ifdef __cplusplus
  }
 #endif
