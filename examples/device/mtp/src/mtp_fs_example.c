@@ -145,6 +145,7 @@ mtp_response_t tud_mtp_get_storage_info(uint32_t storage_id, mtp_storage_info_t 
     return MTP_RESC_OK;
 }
 
+mtp_response_t tud_mtp_storage_format(uint32_t storage_id)
 mtp_response_t tud_mpt_storage_format(uint32_t storage_id)
 {
     if (curr_session_id == 0)

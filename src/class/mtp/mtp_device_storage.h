@@ -78,7 +78,7 @@ mtp_response_t tud_mtp_get_storage_id(uint32_t *storage_id);
 mtp_response_t tud_mtp_get_storage_info(uint32_t storage_id, mtp_storage_info_t *info);
 
 // Format the specified storage
-mtp_response_t tud_mpt_storage_format(uint32_t storage_id);
+mtp_response_t tud_mtp_storage_format(uint32_t storage_id);
 
 // Traverse the given parent object handle and return a child handle for each call
 //
