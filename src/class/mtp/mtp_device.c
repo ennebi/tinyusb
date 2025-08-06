@@ -84,6 +84,7 @@ tu_static mtp_phase_type_t mtpd_handle_cmd(void);
 tu_static mtp_phase_type_t mtpd_handle_data(void);
 tu_static mtp_phase_type_t mtpd_handle_cmd_get_device_info(void);
 tu_static mtp_phase_type_t mtpd_handle_cmd_open_session(void);
+tu_static mtp_phase_type_t mtpd_handle_cmd_close_session(void);
 tu_static mtp_phase_type_t mtpd_handle_cmd_get_storage_info(void);
 tu_static mtp_phase_type_t mtpd_handle_cmd_get_storage_ids(void);
 tu_static mtp_phase_type_t mtpd_handle_cmd_get_object_handles(void);
@@ -188,39 +189,29 @@ bool mtpd_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t 
   {
     case MTP_REQ_CANCEL:
       TU_LOG_DRV("  MTP request: MTP_REQ_CANCEL\n");
+      tud_mtp_storage_cancel();
     break;
     case MTP_REQ_GET_EXT_EVENT_DATA:
       TU_LOG_DRV("  MTP request: MTP_REQ_GET_EXT_EVENT_DATA\n");
     break;
     case MTP_REQ_RESET:
       TU_LOG_DRV("  MTP request: MTP_REQ_RESET\n");
-      // TODO StorageCancel
-      // Prepare for a new transaction
+      tud_mtp_storage_reset();
+      // Prepare for a new command
       TU_ASSERT( usbd_edpt_xfer(rhport, _mtpd_itf.ep_out, ((uint8_t *)(&_mtpd_gct)), CFG_MTP_EP_SIZE) );
     break;
     case MTP_REQ_GET_DEVICE_STATUS:
       TU_LOG_DRV("  MTP request: MTP_REQ_GET_DEVICE_STATUS\n");
-      switch (_mtpd_itf.phase)
-      {
-        case MTP_PHASE_RESPONSE:
-        case MTP_PHASE_DATA_OUT:
-        case MTP_PHASE_DATA_IN:
-          len = 4;
-          _mtpd_device_status_res.wLength = len;
-          _mtpd_device_status_res.code = MTP_RESC_DEVICE_BUSY;
-        break;
-        case MTP_PHASE_IDLE:
-          len = 4;
-          _mtpd_device_status_res.wLength = len;
-          _mtpd_device_status_res.code = MTP_RESC_OK;
-        break;
-        default:
-        break;
-      }
+      len = 4;
+      _mtpd_device_status_res.wLength = len;
+      // Cancel is synchronous, always answer OK
+      _mtpd_device_status_res.code = MTP_RESC_OK;
       TU_ASSERT( tud_control_xfer(rhport, request, (uint8_t *)&_mtpd_device_status_res , len) );
     break;
 
-    default: return false; // stall unsupported request
+    default:
+      TU_LOG_DRV("  MTP request: invalid request\r\n");
+      return false; // stall unsupported request
     }
   return true;
 }
@@ -435,7 +426,7 @@ mtp_phase_type_t mtpd_handle_cmd(void)
       return mtpd_handle_cmd_open_session();
     case MTP_OPEC_CLOSE_SESSION:
       TU_LOG_DRV("  MTP command: MTP_OPEC_CLOSE_SESSION\n");
-      break;
+      return mtpd_handle_cmd_close_session();
     case MTP_OPEC_GET_STORAGE_IDS:
       TU_LOG_DRV("  MTP command: MTP_OPEC_GET_STORAGE_IDS\n");
       return mtpd_handle_cmd_get_storage_ids();
@@ -458,7 +449,7 @@ mtp_phase_type_t mtpd_handle_cmd(void)
       TU_LOG_DRV("  MTP command: MTP_OPEC_GET_DEVICE_PROP_DESC\n");
       return mtpd_handle_cmd_get_device_prop_desc();
     case MTP_OPEC_GET_DEVICE_PROP_VALUE:
-      TU_LOG_DRV("  MTP commandç MTP_OPEC_GET_DEVICE_PROP_VALUE\n");
+      TU_LOG_DRV("  MTP command: MTP_OPEC_GET_DEVICE_PROP_VALUE\n");
       return mtpd_handle_cmd_get_device_prop_value();
     case MTP_OPEC_SEND_OBJECT_INFO:
       TU_LOG_DRV("  MTP command: MTP_OPEC_SEND_OBJECT_INFO\n");
@@ -556,6 +547,21 @@ mtp_phase_type_t mtpd_handle_cmd_open_session(void)
   _mtpd_gct.container_length = MTP_GENERIC_DATA_BLOCK_LENGTH;
   _mtpd_gct.container_type = MTP_CONTAINER_TYPE_RESPONSE_BLOCK;
   _mtpd_gct.code = MTP_RESC_OK;
+
+  return MTP_PHASE_RESPONSE;
+}
+
+mtp_phase_type_t mtpd_handle_cmd_close_session(void)
+{
+  uint32_t session_id = _mtpd_gct.data[0];
+
+  mtp_response_t res = tud_mtp_storage_close_session(session_id);
+
+  _mtpd_ctx.session_id = session_id;
+
+  _mtpd_gct.container_length = MTP_GENERIC_DATA_BLOCK_LENGTH;
+  _mtpd_gct.container_type = MTP_CONTAINER_TYPE_RESPONSE_BLOCK;
+  _mtpd_gct.code = res;
 
   return MTP_PHASE_RESPONSE;
 }
@@ -733,7 +739,7 @@ mtp_phase_type_t mtpd_handle_cmd_get_device_prop_desc(void)
     {
       TU_VERIFY_STATIC(sizeof(mtp_device_prop_desc_t) < MTP_MAX_PACKET_SIZE, "mtp_device_info_t shall fit in MTP_MAX_PACKET_SIZE");
       _mtpd_gct.container_type = MTP_CONTAINER_TYPE_DATA_BLOCK;
-      _mtpd_gct.code = MTP_OPEC_GET_DEVICE_INFO;
+      _mtpd_gct.code = MTP_OPEC_GET_DEVICE_PROP_DESC;
       _mtpd_gct.container_length = MTP_GENERIC_DATA_BLOCK_LENGTH + sizeof(mtp_device_prop_desc_t);
       mtp_device_prop_desc_t *d = (mtp_device_prop_desc_t *)_mtpd_gct.data;
       d->device_property_code = (uint16_t)(device_prop_code);
@@ -762,17 +768,22 @@ mtp_phase_type_t mtpd_handle_cmd_get_device_prop_value(void)
   mtp_phase_type_t rt;
   if ((rt = mtpd_chk_session_open(__func__)) != MTP_PHASE_NONE) return rt;
 
+  _mtpd_gct.container_length = MTP_GENERIC_DATA_BLOCK_LENGTH;
+  _mtpd_gct.container_type = MTP_CONTAINER_TYPE_DATA_BLOCK;
+  _mtpd_gct.code = MTP_OPEC_GET_DEVICE_PROP_VALUE;
+
   switch(device_prop_code)
   {
-    // TODO support device properties
+    // TODO support more device properties
+    case MTP_DEVP_DEVICE_FRIENDLY_NAME:
+      mtpd_gct_append_wstring(CFG_TUD_MODEL);
+      _mtpd_itf.queued_len = _mtpd_gct.container_length;
+      return MTP_PHASE_DATA_IN;
     default:
-      break;
+      _mtpd_gct.container_type = MTP_CONTAINER_TYPE_RESPONSE_BLOCK;
+      _mtpd_gct.code = MTP_RESC_PARAMETER_NOT_SUPPORTED;
+      return MTP_PHASE_RESPONSE;
   }
-
-  _mtpd_gct.container_type = MTP_CONTAINER_TYPE_RESPONSE_BLOCK;
-  _mtpd_gct.code = MTP_RESC_PARAMETER_NOT_SUPPORTED;
-  _mtpd_gct.container_length = MTP_GENERIC_DATA_BLOCK_LENGTH;
-  return MTP_PHASE_RESPONSE;
 }
 
 mtp_phase_type_t mtpd_handle_cmd_send_object_info(void)

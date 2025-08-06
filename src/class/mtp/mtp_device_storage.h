@@ -131,8 +131,14 @@ mtp_response_t tud_mtp_storage_object_move(uint32_t object_handle, uint32_t new_
 // Delete the specified object
 mtp_response_t tud_mtp_storage_object_delete(uint32_t object_handle);
 
-// Cancel any pending operation on objects (e.g. read, traverse) and close file handles
+// Issued when IO operation has been terminated (e.g. read, traverse), close open file handles
 void tud_mtp_storage_object_done(void);
+
+// Cancel any pending operation. Current operation shall be discarded.
+void tud_mtp_storage_cancel(void);
+
+// Restore the operation out of reset. Cancel any pending operation and close the session.
+void tud_mtp_storage_reset(void);
 
 #ifdef __cplusplus
  }
